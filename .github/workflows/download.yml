@@ -30,11 +30,11 @@ jobs:
         id: download_direct
         run: |
           # گرفتن عنوان ویدیو
-          title=$(yt-dlp --get-title --nocheckcertificate --retries 5 "${{ github.event.client_payload.url }}")
+          title=$(yt-dlp --get-title --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
           echo "title=$title" >> $GITHUB_OUTPUT
           
-          # دانلود فیلم با پسوند داینامیک
-          yt-dlp -f "best[ext=mp4]/best" --nocheckcertificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+          # دانلود فیلم با پسوند داینامیک و رترای بی‌نهایت
+          yt-dlp -f "best[ext=mp4]/best" --no-check-certificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
         continue-on-error: true # اگر شکست خورد، کار را متوقف نکن تا برود سراغ پله بعدی
 
       # ─── گام دوم: بیدار کردن پروکسی (فقط اگر دانلود مستقیم شکست خورد) ───
@@ -49,10 +49,10 @@ jobs:
         if: steps.download_direct.outcome == 'failure'
         run: |
           # تلاش مجدد برای گرفتن تایتل و دانلود با آی‌پی کلودفلر WARP
-          title=$(yt-dlp --get-title --nocheckcertificate --retries 5 "${{ github.event.client_payload.url }}")
+          title=$(yt-dlp --get-title --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
           echo "title=$title" >> $GITHUB_OUTPUT
           
-          yt-dlp -f "best[ext=mp4]/best" --nocheckcertificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+          yt-dlp -f "best[ext=mp4]/best" --no-check-certificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
 
       # ─── گام سوم: تعیین تایتل نهایی بر اساس اینکه کدام گام موفق شده ───
       - name: Get Final Title
@@ -75,4 +75,5 @@ jobs:
             "${{ github.event.client_payload.chat_id }}" \
             "${{ github.event.client_payload.message_id }}" \
             "${{ github.event.client_payload.status_msg_id }}" \
+            "video.mp4" \
             "${{ steps.final_title.outputs.val }}"
