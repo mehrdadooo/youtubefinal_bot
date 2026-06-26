@@ -1,6 +1,7 @@
 import sys
 import os
 import asyncio
+from pathlib import Path
 from pyrogram import Client
 
 API_ID = int(os.environ["API_ID"])
@@ -11,10 +12,17 @@ async def main():
     chat_id = int(sys.argv[1])
     message_id = int(sys.argv[2])
     status_msg_id = int(sys.argv[3])
-    file_path = sys.argv[4]
-    title = sys.argv[5]
+    title = sys.argv[4]  # تایتل پارامتر چهارم شد
 
-    # ساخت کلاینت موقت روی گیت‌هاب برای ارسال فایل به کاربر
+    # 🔎 جستجوی خودکار فایل ویدیو با هر پسوندی (mp4, mkv, webm) در پوشه اصلی کارگر
+    matches = sorted(Path(".").glob("video.*"))
+    if not matches:
+        raise FileNotFoundError("❌ هیچ فایل ویدیویی در پوشه اصلی پیدا نشد!")
+    
+    # انتخاب فایل واقعی پیدا شده روی هارد
+    file_path = str(matches[0])
+
+    # ساخت کلاینت موقت روی گیت‌هاب برای ارسال فایل
     app = Client("uploader_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
     async with app:
         # ۱. ارسال ویدیو به عنوان ریپلای به پیام اصلی کاربر
