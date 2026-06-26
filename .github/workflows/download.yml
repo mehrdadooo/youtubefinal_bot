@@ -1,0 +1,75 @@
+name: YouTube Downloader Worker
+
+on:
+  repository_dispatch:
+    types: [download_video]
+
+jobs:
+  download-and-upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      # 🚨 راه‌اندازی کلودفلر WARP روی گیت‌هاب اکشنز برای دور زدن فایروال یوتیوب
+      - name: Set up Cloudflare WARP
+        uses: fscarmen/warp-on-actions@v1.1
+        with:
+          stack: dual
+
+      - name: Install Python Dependencies
+        run: |
+          pip install yt-dlp pyrogram tgcrypto
+
+      - name: Download Video from YouTube
+        id: ytdl
+        run: |
+          # گرفتن عنوان ویدیو
+          title=$(yt-dlp --get-title --nocheckcertificate --retries 5 "${{ github.event.client_payload.url }}")
+          echo "title=$title" >> $GITHUB_OUTPUT
+          
+          # تلاش برای دانلود مستقیم با سرعت بالا و رترای بی‌نهایت
+          yt-dlp -f "best[ext=mp4]/best" --nocheckcertificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.mp4" "${{ github.event.client_payload.url }}"
+        continue-on-error: true # اگر مستقیم نشد، متوقف نشو تا از زاپاس (WARP) استفاده کنیم
+
+      - name: Download Video (via WARP Fallback)
+        id: download_warp
+        if: steps.download_direct.outcome == 'failure'
+        run: |
+          # تلاش مجدد برای دانلود با آی‌پی کلودفلر WARP
+          title=$(yt-dlp --get-title --nocheckcertificate --retries 5 "${{ github.event.client_payload.url }}")
+          echo "title=$title" >> $GITHUB_OUTPUT
+          
+          yt-dlp -f "best[ext=mp4]/best" --nocheckcertificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.mp4" "${{ github.event.client_payload.url }}"
+
+      - name: Get Final Title
+        id: final_title
+        run: |
+          if [ "${{ steps.download_direct.outcome }}" = "success" ]; then
+            echo "val=${{ steps.download_direct.outputs.title }}" >> $GITHUB_OUTPUT
+          else
+            echo "val=${{ steps.download_warp.outputs.title }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Video to Telegram
+        env:
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: |
+          python upload.py \
+            "${{ github.event.client_payload.chat_id }}" \
+            "${{ github.event.client_payload.message_id }}" \
+            "${{ github.event.client_payload.status_msg_id }}" \
+            "video.mp4" \
+            "${{ steps.final_title.outputs.val }}"
