@@ -17,25 +17,31 @@ jobs:
         with:
           python-version: "3.10"
 
+      # 🚨 نصب ffmpeg و nodejs (برای حل کدهای امنیتی جاوااسکریپت یوتیوب)
       - name: Install System Dependencies
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg
+          sudo apt-get update && sudo apt-get install -y ffmpeg nodejs npm
 
       - name: Install Python Dependencies
         run: |
           pip install yt-dlp pyrogram tgcrypto
 
-      # ─── گام اول: تلاش برای دانلود مستقیم با سرعت بی‌نهایت مایکروسافت ───
+      # 🍪 ساخت امنِ فایل کوکی از سکرت‌های گیت‌هاب
+      - name: Setup YouTube Cookies
+        env:
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
+        run: |
+          python -c "import os; open('cookies.txt', 'w', encoding='utf-8').write(os.environ.get('YT_COOKIES', ''))"
+
+      # ─── گام اول: تلاش برای دانلود مستقیم با کوکی و سرعت بی‌نهایت ───
       - name: Download Video (Direct Connection)
         id: download_direct
         run: |
-          # گرفتن عنوان ویدیو
-          title=$(yt-dlp --get-title --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
+          title=$(yt-dlp --get-title --cookies cookies.txt --extractor-args "youtube:player_client=web,mweb" --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
           echo "title=$title" >> $GITHUB_OUTPUT
           
-          # دانلود فیلم با پسوند داینامیک و رترای بی‌نهایت
-          yt-dlp -f "best[ext=mp4]/best" --no-check-certificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
-        continue-on-error: true # اگر شکست خورد، کار را متوقف نکن تا برود سراغ پله بعدی
+          yt-dlp -f "best[ext=mp4]/best" --cookies cookies.txt --extractor-args "youtube:player_client=web,mweb" --no-check-certificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+        continue-on-error: true
 
       # ─── گام دوم: بیدار کردن پروکسی (فقط اگر دانلود مستقیم شکست خورد) ───
       - name: Install & Run Cloudflare WARP (Fallback Mode)
@@ -48,13 +54,12 @@ jobs:
         id: download_warp
         if: steps.download_direct.outcome == 'failure'
         run: |
-          # تلاش مجدد برای گرفتن تایتل و دانلود با آی‌پی کلودفلر WARP
-          title=$(yt-dlp --get-title --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
+          title=$(yt-dlp --get-title --cookies cookies.txt --extractor-args "youtube:player_client=web,mweb" --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
           echo "title=$title" >> $GITHUB_OUTPUT
           
-          yt-dlp -f "best[ext=mp4]/best" --no-check-certificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+          yt-dlp -f "best[ext=mp4]/best" --cookies cookies.txt --extractor-args "youtube:player_client=web,mweb" --no-check-certificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
 
-      # ─── گام سوم: تعیین تایتل نهایی بر اساس اینکه کدام گام موفق شده ───
+      # ─── گام سوم: تعیین تایتل نهایی ───
       - name: Get Final Title
         id: final_title
         run: |
@@ -64,7 +69,7 @@ jobs:
             echo "val=${{ steps.download_warp.outputs.title }}" >> $GITHUB_OUTPUT
           fi
 
-      # ─── گام چهارم: آپلود نهایی به تلگرام با Pyrogram ───
+      # ─── گام چهارم: آپلود نهایی به تلگرام ───
       - name: Upload Video to Telegram
         env:
           API_ID: ${{ secrets.API_ID }}
