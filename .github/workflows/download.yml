@@ -21,37 +21,40 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg
 
-      # 🚨 راه‌اندازی کلودفلر WARP روی گیت‌هاب اکشنز برای دور زدن فایروال یوتیوب
-      - name: Set up Cloudflare WARP
-        uses: fscarmen/warp-on-actions@v1.1
-        with:
-          stack: dual
-
       - name: Install Python Dependencies
         run: |
           pip install yt-dlp pyrogram tgcrypto
 
-      - name: Download Video from YouTube
-        id: ytdl
+      # ─── گام اول: تلاش برای دانلود مستقیم با سرعت بی‌نهایت مایکروسافت ───
+      - name: Download Video (Direct Connection)
+        id: download_direct
         run: |
           # گرفتن عنوان ویدیو
           title=$(yt-dlp --get-title --nocheckcertificate --retries 5 "${{ github.event.client_payload.url }}")
           echo "title=$title" >> $GITHUB_OUTPUT
           
-          # تلاش برای دانلود مستقیم با سرعت بالا و رترای بی‌نهایت
-          yt-dlp -f "best[ext=mp4]/best" --nocheckcertificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.mp4" "${{ github.event.client_payload.url }}"
-        continue-on-error: true # اگر مستقیم نشد، متوقف نشو تا از زاپاس (WARP) استفاده کنیم
+          # دانلود فیلم با پسوند داینامیک
+          yt-dlp -f "best[ext=mp4]/best" --nocheckcertificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+        continue-on-error: true # اگر شکست خورد، کار را متوقف نکن تا برود سراغ پله بعدی
+
+      # ─── گام دوم: بیدار کردن پروکسی (فقط اگر دانلود مستقیم شکست خورد) ───
+      - name: Install & Run Cloudflare WARP (Fallback Mode)
+        if: steps.download_direct.outcome == 'failure'
+        uses: fscarmen/warp-on-actions@v1.1
+        with:
+          stack: dual
 
       - name: Download Video (via WARP Fallback)
         id: download_warp
         if: steps.download_direct.outcome == 'failure'
         run: |
-          # تلاش مجدد برای دانلود با آی‌پی کلودفلر WARP
+          # تلاش مجدد برای گرفتن تایتل و دانلود با آی‌پی کلودفلر WARP
           title=$(yt-dlp --get-title --nocheckcertificate --retries 5 "${{ github.event.client_payload.url }}")
           echo "title=$title" >> $GITHUB_OUTPUT
           
-          yt-dlp -f "best[ext=mp4]/best" --nocheckcertificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.mp4" "${{ github.event.client_payload.url }}"
+          yt-dlp -f "best[ext=mp4]/best" --nocheckcertificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
 
+      # ─── گام سوم: تعیین تایتل نهایی بر اساس اینکه کدام گام موفق شده ───
       - name: Get Final Title
         id: final_title
         run: |
@@ -61,6 +64,7 @@ jobs:
             echo "val=${{ steps.download_warp.outputs.title }}" >> $GITHUB_OUTPUT
           fi
 
+      # ─── گام چهارم: آپلود نهایی به تلگرام با Pyrogram ───
       - name: Upload Video to Telegram
         env:
           API_ID: ${{ secrets.API_ID }}
@@ -71,5 +75,4 @@ jobs:
             "${{ github.event.client_payload.chat_id }}" \
             "${{ github.event.client_payload.message_id }}" \
             "${{ github.event.client_payload.status_msg_id }}" \
-            "video.mp4" \
             "${{ steps.final_title.outputs.val }}"
