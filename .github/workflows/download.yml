@@ -17,13 +17,17 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install System Dependencies
+      # 🚨 نصب Deno (موتور جاوااسکریپت) برای حل کردن معمای ضدرباتِ یوتیوب
+      - name: Install Deno & FFmpeg
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg nodejs npm
+          sudo apt-get update && sudo apt-get install -y ffmpeg curl unzip
+          curl -fsSL https://deno.land/x/install/install.sh | sh
+          echo "$HOME/.deno/bin" >> $GITHUB_PATH
 
+      # 🚨 نصب yt-dlp به همراه شبیه‌ساز اثر انگشت کروم (curl_cffi)
       - name: Install Python Dependencies
         run: |
-          pip install -U yt-dlp pyrogram tgcrypto
+          pip install -U "yt-dlp[default,curl-cffi]" pyrogram tgcrypto
 
       - name: Setup YouTube Cookies
         env:
@@ -31,17 +35,17 @@ jobs:
         run: |
           python -c "import os; open('cookies.txt', 'w', encoding='utf-8').write(os.environ.get('YT_COOKIES', ''))"
 
-      # ─── گام اول: دانلود مستقیم با کوکی و کلاینت آیفون/تلویزیون ───
+      # ─── گام اول: دانلود مستقیم با کوکی، شبیه‌ساز کروم و کلاینت وب ───
       - name: Download Video (Direct Connection)
         id: download_direct
         run: |
-          title=$(yt-dlp --get-title --cookies cookies.txt --extractor-args "youtube:player_client=ios,tv,android" --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
+          title=$(yt-dlp --get-title --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=web" --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
           echo "title=$title" >> $GITHUB_OUTPUT
           
-          yt-dlp -f "best[ext=mp4]/best" --cookies cookies.txt --extractor-args "youtube:player_client=ios,tv,android" --no-check-certificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+          yt-dlp -f "best[ext=mp4]/best" --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=web" --no-check-certificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
         continue-on-error: true
 
-      # ─── گام دوم: بیدار کردن پروکسی (فقط اگر دانلود مستقیم شکست خورد) ───
+      # ─── گام دوم: بیدار کردن پروکسی در صورت شکست ───
       - name: Install & Run Cloudflare WARP (Fallback Mode)
         if: steps.download_direct.outcome == 'failure'
         uses: fscarmen/warp-on-actions@v1.1
@@ -52,12 +56,12 @@ jobs:
         id: download_warp
         if: steps.download_direct.outcome == 'failure'
         run: |
-          title=$(yt-dlp --get-title --cookies cookies.txt --extractor-args "youtube:player_client=ios,tv,android" --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
+          title=$(yt-dlp --get-title --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=web" --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
           echo "title=$title" >> $GITHUB_OUTPUT
           
-          yt-dlp -f "best[ext=mp4]/best" --cookies cookies.txt --extractor-args "youtube:player_client=ios,tv,android" --no-check-certificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+          yt-dlp -f "best[ext=mp4]/best" --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=web" --no-check-certificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
 
-      # ─── گام سوم: آپلود نهایی به تلگرام ───
+      # ─── گام سوم: آپلود به تلگرام ───
       - name: Get Final Title
         id: final_title
         run: |
