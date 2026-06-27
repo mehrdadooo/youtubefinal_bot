@@ -17,33 +17,36 @@ jobs:
         with:
           python-version: "3.10"
 
-      # 🚨 نصب بومی و ضدگلوله FFmpeg از سرورهای اصلی لینوکس (بدون قطعی تحت فشار)
+      # 🚨 نصب ffmpeg برای سرعت و nodejs برای حل کدهای امنیتی جاوااسکریپت یوتیوب
       - name: Install System Dependencies
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg
+          sudo apt-get update && sudo apt-get install -y ffmpeg nodejs npm
 
-      # نصب سریع پکیج‌های پایتون
       - name: Install Python Dependencies
         run: |
           pip install -U yt-dlp pyrogram tgcrypto
 
-      - name: Download Video (Direct Connection)
+      # 🍪 ساخت امنِ فایل کوکی از سکرت‌های گیت‌هاب
+      - name: Setup YouTube Cookies
+        env:
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
+        run: |
+          python -c "import os; open('cookies.txt', 'w', encoding='utf-8').write(os.environ.get('YT_COOKIES', ''))"
+
+      # ─── دانلود مستقیم با کوکی و کلاینت موبایل (ضد-تحریم) ───
+      - name: Download Video
         id: download_direct
         run: |
           # گرفتن عنوان ویدیو
-          title=$(yt-dlp --get-title --no-check-certificate --retries 2 "${{ github.event.client_payload.url }}")
+          title=$(yt-dlp --get-title --cookies cookies.txt --extractor-args "youtube:player_client=ios,tv,android" --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
           echo "title=$title" >> $GITHUB_OUTPUT
           
-          # دانلود با سرعت بالا و قطعات موازی
-          yt-dlp -f "best[ext=mp4]/best" --no-check-certificate --retries 5 --fragment-retries 5 --concurrent-fragments 10 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
-        continue-on-error: true
+          # دانلود فیلم با سرعت بالا و رترای بی‌نهایت
+          yt-dlp -f "best[ext=mp4]/best" --cookies cookies.txt --extractor-args "youtube:player_client=ios,tv,android" --no-check-certificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
 
-      - name: Get Final Title
-        id: final_title
-        run: |
-          echo "val=${{ steps.download_direct.outputs.title }}" >> $GITHUB_OUTPUT
-
+      # ─── آپلود نهایی به تلگرام ───
       - name: Upload Video to Telegram
+        if: success() # فقط اگر دانلود موفق بود اجرا شود تا ارور فایل خالی ندهد
         env:
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
@@ -53,4 +56,4 @@ jobs:
             "${{ github.event.client_payload.chat_id }}" \
             "${{ github.event.client_payload.message_id }}" \
             "${{ github.event.client_payload.status_msg_id }}" \
-            "${{ steps.final_title.outputs.val }}"
+            "${{ steps.download_direct.outputs.title }}"
