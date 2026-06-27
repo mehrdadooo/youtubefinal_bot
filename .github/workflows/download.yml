@@ -17,11 +17,12 @@ jobs:
         with:
           python-version: "3.10"
 
-      # 🚀 توربو ۱: استفاده از افزونه فوق‌سریع برای نصب FFmpeg (۲ ثانیه به جای ۳۰ ثانیه!)
-      - name: Setup FFmpeg
-        uses: FedericoCarboni/setup-ffmpeg@v3
+      # 🚨 نصب بومی و ضدگلوله FFmpeg از سرورهای اصلی لینوکس (بدون قطعی تحت فشار)
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
 
-      # 🚀 توربو ۲: نصب سریع پکیج‌های پایتون
+      # نصب سریع پکیج‌های پایتون
       - name: Install Python Dependencies
         run: |
           pip install -U yt-dlp pyrogram tgcrypto
@@ -29,10 +30,11 @@ jobs:
       - name: Download Video (Direct Connection)
         id: download_direct
         run: |
+          # گرفتن عنوان ویدیو
           title=$(yt-dlp --get-title --no-check-certificate --retries 2 "${{ github.event.client_payload.url }}")
           echo "title=$title" >> $GITHUB_OUTPUT
           
-          # بهینه‌سازی سرعت خود دانلودر با کانکشن‌های موازی
+          # دانلود با سرعت بالا و قطعات موازی
           yt-dlp -f "best[ext=mp4]/best" --no-check-certificate --retries 5 --fragment-retries 5 --concurrent-fragments 10 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
         continue-on-error: true
 
