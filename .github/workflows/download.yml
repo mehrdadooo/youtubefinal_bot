@@ -12,18 +12,16 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 🚀 توربو ۱: کش کردن پایتون (نصب در ۲ ثانیه به جای ۱۵ ثانیه)
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-          cache: 'pip' # این خط پکیج‌ها را تو حافظه نگه می‌دارد
 
-      # 🚀 توربو ۲: استفاده از افزونه فوق‌سریع برای نصب FFmpeg (۲ ثانیه به جای ۳۰ ثانیه!)
+      # 🚀 توربو ۱: استفاده از افزونه فوق‌سریع برای نصب FFmpeg (۲ ثانیه به جای ۳۰ ثانیه!)
       - name: Setup FFmpeg
         uses: FedericoCarboni/setup-ffmpeg@v3
 
-      # 🚀 توربو ۳: نصب سریع پکیج‌ها با استفاده از کش
+      # 🚀 توربو ۲: نصب سریع پکیج‌های پایتون
       - name: Install Python Dependencies
         run: |
           pip install -U yt-dlp pyrogram tgcrypto
@@ -34,7 +32,7 @@ jobs:
           title=$(yt-dlp --get-title --no-check-certificate --retries 2 "${{ github.event.client_payload.url }}")
           echo "title=$title" >> $GITHUB_OUTPUT
           
-          # بهینه‌سازی سرعت خود دانلودر
+          # بهینه‌سازی سرعت خود دانلودر با کانکشن‌های موازی
           yt-dlp -f "best[ext=mp4]/best" --no-check-certificate --retries 5 --fragment-retries 5 --concurrent-fragments 10 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
         continue-on-error: true
 
