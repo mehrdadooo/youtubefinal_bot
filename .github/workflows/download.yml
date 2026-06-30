@@ -7,6 +7,7 @@ on:
 jobs:
   download-and-upload:
     runs-on: ubuntu-latest
+    timeout-minutes: 7 # 🚨 قطع خودکار کل فرآیند اگر بیش از ۷ دقیقه طول بکشد
 
     steps:
       - name: Checkout Code
@@ -24,10 +25,10 @@ jobs:
           curl -fsSL https://deno.land/x/install/install.sh | sh
           echo "$HOME/.deno/bin" >> $GITHUB_PATH
 
-      # 🚨 نصب yt-dlp به همراه شبیه‌ساز اثر انگشت کروم (curl_cffi)
+      # 🚨 نصب پکیج‌های پایتون (پکیج redis اضافه شده است)
       - name: Install Python Dependencies
         run: |
-          pip install -U "yt-dlp[default,curl-cffi]" pyrogram tgcrypto
+          pip install -U "yt-dlp[default,curl-cffi]" pyrogram tgcrypto redis
 
       - name: Setup YouTube Cookies
         env:
@@ -61,7 +62,7 @@ jobs:
           
           yt-dlp -f "best[ext=mp4]/best" --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=web" --no-check-certificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
 
-      # ─── گام سوم: آپلود به تلگرام ───
+      # ─── گام سوم: دریافت تایتل نهایی ───
       - name: Get Final Title
         id: final_title
         run: |
@@ -71,11 +72,13 @@ jobs:
             echo "val=${{ steps.download_warp.outputs.title }}" >> $GITHUB_OUTPUT
           fi
 
+      # ─── گام چهارم: آپلود هوشمند به تلگرام ───
       - name: Upload Video to Telegram
         env:
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          REDIS_URL: ${{ secrets.REDIS_URL }} # 🚨 ارسال سکرت رِدیس به پایتون
         run: |
           python upload.py \
             "${{ github.event.client_payload.chat_id }}" \
