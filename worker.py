@@ -16,16 +16,16 @@ WORKER_SECRET = "ali_vip_worker_2026"
 app = Client("vip_worker", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
 
 async def download_video(url, job_dir):
-    """عملیات دانلود با سیستم بای‌پَس آنتی‌بات یوتیوب"""
+    """عملیات دانلود با جا زدن به عنوان آیفون و تلویزیون (ایده عالی شما)"""
     import yt_dlp
     
-    # تنظیمات حرفه‌ای برای شبیه‌سازی انسان و دور زدن ربات‌شناس یوتیوب
     ydl_opts = {
         'format': 'best[ext=mp4]/best',
         'outtmpl': f'{job_dir}/%(id)s.%(ext)s',
         'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None,
-        'impersonate': 'chrome', # شبیه‌سازی مرورگر کروم
-        'extractor_args': {'youtube': {'player_client': ['web']}}, # اجبار به استفاده از کلاینت وب
+        'impersonate': 'chrome', 
+        # 🚨 این همان تکنیک طلایی شماست: جا زدن به عنوان آیفون و تلویزیون 🚨
+        'extractor_args': {'youtube': {'player_client': ['ios,tv']}}, 
         'quiet': True,
         'no_warnings': True
     }
