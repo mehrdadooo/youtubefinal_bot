@@ -15,33 +15,45 @@ WORKER_SECRET = "ali_vip_worker_2026"
 
 app = Client("vip_worker", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
 
-# حل مشکل پیدا کردن مسیر دقیق فایل کوکی در کداسپیس
+# پیدا کردن مسیر دقیق فایل کوکی در پوشه فعلی
 COOKIE_FILE_PATH = Path(__file__).parent / "cookies.txt"
 
 async def download_video(url, job_dir):
-    """عملیات دانلود با سیستم بای‌پَس آنتی‌بات ۲۰۲۶ یوتیوب"""
-    import yt_dlp
+    """اجرای مستقیم خط فرمان yt-dlp دقیقاً مشابه گیت‌هاب اکشنز شما"""
     
     # بررسی وجود فایل کوکی
-    cookie_file = str(COOKIE_FILE_PATH.resolve()) if COOKIE_FILE_PATH.exists() else None
+    if not COOKIE_FILE_PATH.exists():
+        raise FileNotFoundError("⚠️ فایل cookies.txt پیدا نشد! لطفاً مطمئن شوید فایل کوکی را در پوشه اصلی ساخته‌اید.")
+
+    # دستور دقیق خط فرمان گیت‌هاب شما
+    cmd = [
+        "yt-dlp",
+        "-f", "best[ext=mp4]/best",
+        "--cookies", str(COOKIE_FILE_PATH.resolve()),
+        "--impersonate", "chrome",
+        "--extractor-args", "youtube:player_client=web",
+        "--no-check-certificate",
+        "--retries", "5",
+        "-o", f"{job_dir}/video.%(ext)s",
+        url
+    ]
     
-    ydl_opts = {
-        'format': 'best[ext=mp4]/best',
-        'outtmpl': f'{job_dir}/%(id)s.%(ext)s',
-        'cookiefile': cookie_file,
-        'impersonate': 'chrome', 
-        # کلاینت بهینه‌شده ۲۰۲۶ برای ترکیب با کوکی‌ها (غیرفعال کردن اندروید قدیمی)
-        'extractor_args': {'youtube': {'player_client': ['default', '-android_sdkless']}}, 
-        'quiet': True,
-        'no_warnings': True
-    }
+    print(f"🎬 Running Command: {' '.join(cmd)}")
     
-    def _run():
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            return info.get('title', 'Unknown Title')
-            
-    return await asyncio.to_thread(_run)
+    # اجرای آسنکرون خط فرمان
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    
+    stdout, stderr = await process.communicate()
+    
+    if process.returncode != 0:
+        error_msg = stderr.decode().strip()
+        raise Exception(f"yt-dlp terminal failed: {error_msg}")
+        
+    return "Video Downloaded Successfully"
 
 async def main():
     print("\n" + "="*50)
@@ -83,18 +95,25 @@ async def main():
                         print(f"[{job_id}] 📥 Job Acquired! Downloading: {url}")
 
                         try:
-                            title = await download_video(url, job_dir)
+                            # اجرای خط فرمان دانلود
+                            await download_video(url, job_dir)
                             
-                            matches = list(job_dir.glob("*.*"))
+                            # پیدا کردن فایل ویدیو دانلود شده
+                            matches = list(job_dir.glob("video.*"))
                             if not matches:
-                                raise FileNotFoundError("Video not found!")
+                                # اگر با فرمتی غیر از mp4 ذخیره شده باشد، کل پوشه را سرچ کن
+                                matches = list(job_dir.glob("*.*"))
+                                
+                            if not matches:
+                                raise FileNotFoundError("Video file not found in job directory!")
+                                
                             file_path = str(matches[0])
 
                             print(f"[{job_id}] 🚀 Uploading to Telegram...")
                             await app.send_video(
                                 chat_id=chat_id,
                                 video=file_path,
-                                caption=f"🎬 **{title}**\n\n⚡ دانلود سریع توسط **Codespace (VIP)**",
+                                caption=f"🎬 دانلود سریع توسط **Codespace (VIP)**",
                                 reply_to_message_id=message_id,
                                 supports_streaming=True
                             )
