@@ -15,17 +15,23 @@ WORKER_SECRET = "ali_vip_worker_2026"
 
 app = Client("vip_worker", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
 
+# حل مشکل پیدا کردن مسیر دقیق فایل کوکی در کداسپیس
+COOKIE_FILE_PATH = Path(__file__).parent / "cookies.txt"
+
 async def download_video(url, job_dir):
-    """عملیات دانلود با جا زدن به عنوان آیفون و تلویزیون (ایده عالی شما)"""
+    """عملیات دانلود با سیستم بای‌پَس آنتی‌بات ۲۰۲۶ یوتیوب"""
     import yt_dlp
+    
+    # بررسی وجود فایل کوکی
+    cookie_file = str(COOKIE_FILE_PATH.resolve()) if COOKIE_FILE_PATH.exists() else None
     
     ydl_opts = {
         'format': 'best[ext=mp4]/best',
         'outtmpl': f'{job_dir}/%(id)s.%(ext)s',
-        'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None,
+        'cookiefile': cookie_file,
         'impersonate': 'chrome', 
-        # 🚨 این همان تکنیک طلایی شماست: جا زدن به عنوان آیفون و تلویزیون 🚨
-        'extractor_args': {'youtube': {'player_client': ['ios,tv']}}, 
+        # کلاینت بهینه‌شده ۲۰۲۶ برای ترکیب با کوکی‌ها (غیرفعال کردن اندروید قدیمی)
+        'extractor_args': {'youtube': {'player_client': ['default', '-android_sdkless']}}, 
         'quiet': True,
         'no_warnings': True
     }
@@ -38,6 +44,16 @@ async def download_video(url, job_dir):
     return await asyncio.to_thread(_run)
 
 async def main():
+    print("\n" + "="*50)
+    print("🔍 DIAGNOSTIC SYSTEM STARTING:")
+    print(f"📁 Looking for cookies at: {COOKIE_FILE_PATH.resolve()}")
+    if COOKIE_FILE_PATH.exists():
+        print("✅ SUCCESS: cookies.txt FOUND and will be loaded!")
+    else:
+        print("⚠️ WARNING: cookies.txt was NOT found next to worker.py!")
+        print("   Please create cookies.txt in the same folder as worker.py")
+    print("="*50 + "\n")
+
     print("🚀 Starting Persistent Telegram Client...")
     await app.start()
     print("✅ VIP Worker Ready! Polling Hugging Face for jobs...\n")
