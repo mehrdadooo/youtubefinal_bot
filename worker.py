@@ -9,7 +9,7 @@ from pyrogram import Client
 # ─── تنظیمات اختصاصی شما ───
 API_ID = 39884025
 API_HASH = "24ce21160fcabd7e7c0de00a77b45ef3"
-BOT_TOKEN = "8813125038:AAFZinXNwq9rdNq4B8LaRzQjMFIvj3ZZNvs"
+BOT_TOKEN = "8813125038:AAFwiPBCMSJvFmKlFSHNqApJ-d0kzW0lUv4"
 HF_URL = "https://downloads89oouu-downloader.hf.space" 
 WORKER_SECRET = "ali_vip_worker_2026"
 
