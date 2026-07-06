@@ -7,7 +7,7 @@ on:
 jobs:
   download-and-upload:
     runs-on: ubuntu-latest
-    timeout-minutes: 7 # 🚨 قطع خودکار کل فرآیند اگر بیش از ۷ دقیقه طول بکشد
+    timeout-minutes: 15 # افزایش تایم‌اوت به دلیل ادغام ویدیو و صدا
 
     steps:
       - name: Checkout Code
@@ -18,14 +18,12 @@ jobs:
         with:
           python-version: "3.10"
 
-      # 🚨 نصب Deno (موتور جاوااسکریپت) برای حل کردن معمای ضدرباتِ یوتیوب
       - name: Install Deno & FFmpeg
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg curl unzip
           curl -fsSL https://deno.land/x/install/install.sh | sh
           echo "$HOME/.deno/bin" >> $GITHUB_PATH
 
-      # 🚨 نصب پکیج‌های پایتون (پکیج redis اضافه شده است)
       - name: Install Python Dependencies
         run: |
           pip install -U "yt-dlp[default,curl-cffi]" pyrogram tgcrypto redis
@@ -36,31 +34,31 @@ jobs:
         run: |
           python -c "import os; open('cookies.txt', 'w', encoding='utf-8').write(os.environ.get('YT_COOKIES', ''))"
 
-      # ─── گام اول: دانلود مستقیم با کوکی، شبیه‌ساز کروم و کلاینت وب ───
-      - name: Download Video (Direct Connection)
+      # ─── گام اول: دانلود با کلاینت TV و شبیه‌ساز Chrome ───
+      - name: Download Video (TV Client)
         id: download_direct
         run: |
-          title=$(yt-dlp --get-title --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=web" --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
+          title=$(yt-dlp --get-title --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=tv" --remote-components "ejs:github" --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
           echo "title=$title" >> $GITHUB_OUTPUT
           
-          yt-dlp -f "best[ext=mp4]/best" --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=web" --no-check-certificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=tv" --remote-components "ejs:github" --no-check-certificate --retries 10 --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
         continue-on-error: true
 
-      # ─── گام دوم: بیدار کردن پروکسی در صورت شکست ───
+      # ─── گام دوم: بیدار کردن پروکسی در صورت شکست گام اول ───
       - name: Install & Run Cloudflare WARP (Fallback Mode)
         if: steps.download_direct.outcome == 'failure'
         uses: fscarmen/warp-on-actions@v1.1
         with:
           stack: dual
 
-      - name: Download Video (via WARP Fallback)
+      - name: Download Video (via WARP Fallback + TV Client)
         id: download_warp
         if: steps.download_direct.outcome == 'failure'
         run: |
-          title=$(yt-dlp --get-title --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=web" --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
+          title=$(yt-dlp --get-title --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=tv" --remote-components "ejs:github" --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
           echo "title=$title" >> $GITHUB_OUTPUT
           
-          yt-dlp -f "best[ext=mp4]/best" --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=web" --no-check-certificate --retries infinite --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=tv" --remote-components "ejs:github" --no-check-certificate --retries 10 --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
 
       # ─── گام سوم: دریافت تایتل نهایی ───
       - name: Get Final Title
@@ -78,7 +76,7 @@ jobs:
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          REDIS_URL: ${{ secrets.REDIS_URL }} # 🚨 ارسال سکرت رِدیس به پایتون
+          REDIS_URL: ${{ secrets.REDIS_URL }}
         run: |
           python upload.py \
             "${{ github.event.client_payload.chat_id }}" \
