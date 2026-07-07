@@ -7,7 +7,7 @@ on:
 jobs:
   download-and-upload:
     runs-on: ubuntu-latest
-    timeout-minutes: 15 # افزایش تایم‌اوت به دلیل ادغام ویدیو و صدا
+    timeout-minutes: 15
 
     steps:
       - name: Checkout Code
@@ -28,20 +28,14 @@ jobs:
         run: |
           pip install -U "yt-dlp[default,curl-cffi]" pyrogram tgcrypto redis
 
-      - name: Setup YouTube Cookies
-        env:
-          YT_COOKIES: ${{ secrets.YT_COOKIES }}
-        run: |
-          python -c "import os; open('cookies.txt', 'w', encoding='utf-8').write(os.environ.get('YT_COOKIES', ''))"
-
-      # ─── گام اول: دانلود با کلاینت TV و شبیه‌ساز Chrome ───
-      - name: Download Video (TV Client)
+      # ─── گام اول: دانلود با کلاینت ترکیبی iOS/TV و بدون کوکی (برای جلوگیری از 403) ───
+      - name: Download Video (Direct Connection)
         id: download_direct
         run: |
-          title=$(yt-dlp --get-title --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=tv" --remote-components "ejs:github" --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
+          title=$(yt-dlp --get-title --impersonate chrome --extractor-args "youtube:player_client=ios,tv" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 5 "${{ github.event.client_payload.url }}")
           echo "title=$title" >> $GITHUB_OUTPUT
           
-          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=tv" --remote-components "ejs:github" --no-check-certificate --retries 10 --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --impersonate chrome --extractor-args "youtube:player_client=ios,tv" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 10 --fragment-retries infinite --concurrent-fragments 3 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
         continue-on-error: true
 
       # ─── گام دوم: بیدار کردن پروکسی در صورت شکست گام اول ───
@@ -51,14 +45,14 @@ jobs:
         with:
           stack: dual
 
-      - name: Download Video (via WARP Fallback + TV Client)
+      - name: Download Video (via WARP Fallback + iOS/TV Client)
         id: download_warp
         if: steps.download_direct.outcome == 'failure'
         run: |
-          title=$(yt-dlp --get-title --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=tv" --remote-components "ejs:github" --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
+          title=$(yt-dlp --get-title --impersonate chrome --extractor-args "youtube:player_client=ios,tv" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 5 "${{ github.event.client_payload.url }}")
           echo "title=$title" >> $GITHUB_OUTPUT
           
-          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=tv" --remote-components "ejs:github" --no-check-certificate --retries 10 --fragment-retries infinite --concurrent-fragments 8 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --impersonate chrome --extractor-args "youtube:player_client=ios,tv" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 10 --fragment-retries infinite --concurrent-fragments 3 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
 
       # ─── گام سوم: دریافت تایتل نهایی ───
       - name: Get Final Title
@@ -70,13 +64,13 @@ jobs:
             echo "val=${{ steps.download_warp.outputs.title }}" >> $GITHUB_OUTPUT
           fi
 
-      # ─── گام چهارم: آپلود هوشمند به تلگرام ───
+      # ─── گام چهارم: آپلود هوشمند به تلگرام (با سشن‌های دائمی) ───
       - name: Upload Video to Telegram
         env:
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          BOT_SESSIONS: ${{ secrets.BOT_SESSIONS }} # 🚨 سشن‌های دائمی اضافه شد 🚨
+          BOT_SESSIONS: ${{ secrets.BOT_SESSIONS }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
         run: |
           python upload.py \
