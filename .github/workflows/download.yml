@@ -13,7 +13,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 🚨 آپدیت به پایتون 3.11 برای رفع هشدار زرد رنگ
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -35,7 +34,7 @@ jobs:
         run: |
           python -c "import os; open('cookies.txt', 'w', encoding='utf-8').write(os.environ.get('YT_COOKIES', ''))"
 
-      # ─── گام اول (نینجا): بدون کوکی + کلاینت اندروید (سریع و مخفیانه) ───
+      # ─── گام اول: دانلود مستقیم ───
       - name: Download Video (Ninja Mode)
         id: download_direct
         run: |
@@ -45,15 +44,14 @@ jobs:
           yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --impersonate chrome --extractor-args "youtube:player_client=android,web" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 5 --fragment-retries infinite --concurrent-fragments 3 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
         continue-on-error: true
 
-      # ─── روشن کردن سپر کلودفلر در صورت شکست ───
+      # ─── گام دوم: روشن کردن WARP در صورت نیاز ───
       - name: Install & Run Cloudflare WARP (Fallback Mode)
         if: steps.download_direct.outcome == 'failure'
         uses: fscarmen/warp-on-actions@v1.1
         with:
           stack: dual
 
-      # ─── گام دوم (تانک): با کوکی + آی‌پی WARP + کلاینت پیش‌فرض ───
-      - name: Download Video (Tank Mode)
+      - name: Download Video (via WARP Fallback)
         id: download_warp
         if: steps.download_direct.outcome == 'failure'
         run: |
@@ -62,7 +60,7 @@ jobs:
           
           yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=default" --remote-components "ejs:github" --no-check-certificate --retries 5 --fragment-retries infinite --concurrent-fragments 3 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
 
-      # ─── گام سوم: دریافت تایتل نهایی ───
+      # ─── گام سوم: دریافت تایتل ───
       - name: Get Final Title
         id: final_title
         run: |
@@ -72,7 +70,14 @@ jobs:
             echo "val=${{ steps.download_warp.outputs.title }}" >> $GITHUB_OUTPUT
           fi
 
-      # ─── گام چهارم: آپلود به تلگرام با سشن‌های امن ───
+      # 🚨 گام حیاتی جدید: خاموش کردن پروکسی قبل از تلگرام 🚨
+      - name: Restore Network (Disable WARP)
+        if: always()
+        run: |
+          sudo warp-cli disconnect || true
+          sudo systemctl stop warp-svc || true
+
+      # ─── گام چهارم: آپلود به تلگرام ───
       - name: Upload Video to Telegram
         env:
           API_ID: ${{ secrets.API_ID }}
