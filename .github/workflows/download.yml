@@ -34,7 +34,7 @@ jobs:
         run: |
           python -c "import os; open('cookies.txt', 'w', encoding='utf-8').write(os.environ.get('YT_COOKIES', ''))"
 
-      # ─── گام اول: دانلود مستقیم ───
+      # ─── گام اول: دانلود مستقیم با کلاینت اندروید (نینجا) ───
       - name: Download Video (Ninja Mode)
         id: download_direct
         run: |
@@ -44,23 +44,25 @@ jobs:
           yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --impersonate chrome --extractor-args "youtube:player_client=android,web" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 5 --fragment-retries infinite --concurrent-fragments 3 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
         continue-on-error: true
 
-      # ─── گام دوم: روشن کردن WARP در صورت نیاز ───
+      # ─── گام دوم: روشن کردن WARP ───
       - name: Install & Run Cloudflare WARP (Fallback Mode)
         if: steps.download_direct.outcome == 'failure'
         uses: fscarmen/warp-on-actions@v1.1
         with:
           stack: dual
 
+      # ─── گام سوم: دانلود با WARP + کوکی + فورس IPv4 + کلاینت TV ───
       - name: Download Video (via WARP Fallback)
         id: download_warp
         if: steps.download_direct.outcome == 'failure'
         run: |
-          title=$(yt-dlp --get-title --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=default" --remote-components "ejs:github" --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
+          # 🚨 تغییر حیاتی: استفاده از player_client=tv و --force-ipv4 در حالت WARP 🚨
+          title=$(yt-dlp --get-title --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=tv" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 5 "${{ github.event.client_payload.url }}")
           echo "title=$title" >> $GITHUB_OUTPUT
           
-          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=default" --remote-components "ejs:github" --no-check-certificate --retries 5 --fragment-retries infinite --concurrent-fragments 3 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=tv" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 10 --fragment-retries infinite --concurrent-fragments 3 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
 
-      # ─── گام سوم: دریافت تایتل ───
+      # ─── گام چهارم: دریافت تایتل ───
       - name: Get Final Title
         id: final_title
         run: |
@@ -70,14 +72,14 @@ jobs:
             echo "val=${{ steps.download_warp.outputs.title }}" >> $GITHUB_OUTPUT
           fi
 
-      # 🚨 گام حیاتی جدید: خاموش کردن پروکسی قبل از تلگرام 🚨
+      # ─── خاموش کردن پروکسی قبل از تلگرام ───
       - name: Restore Network (Disable WARP)
         if: always()
         run: |
           sudo warp-cli disconnect || true
           sudo systemctl stop warp-svc || true
 
-      # ─── گام چهارم: آپلود به تلگرام ───
+      # ─── گام پنجم: آپلود ───
       - name: Upload Video to Telegram
         env:
           API_ID: ${{ secrets.API_ID }}
