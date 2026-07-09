@@ -13,16 +13,40 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # 🚨 ۱. کَش کردن پکیج‌های پایتون برای استارت ۲ ثانیه‌ای 🚨
+      - name: Cache Python Dependencies
+        uses: actions/cache@v4
+        id: cache-pip
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # 🚨 ۲. کَش کردن موتور Deno و FFmpeg برای جلوگیری از دانلود مجدد 🚨
+      - name: Cache Deno and FFmpeg
+        uses: actions/cache@v4
+        id: cache-tools
+        with:
+          path: |
+            ~/.deno
+            /usr/bin/ffmpeg
+          key: ${{ runner.os }}-tools-v1
+
       - name: Install Deno & FFmpeg
+        if: steps.cache-tools.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg curl unzip
           curl -fsSL https://deno.land/x/install/install.sh | sh
           echo "$HOME/.deno/bin" >> $GITHUB_PATH
+
+      - name: Ensure Deno Path
+        run: echo "$HOME/.deno/bin" >> $GITHUB_PATH
 
       - name: Install Python Dependencies
         run: |
@@ -34,35 +58,34 @@ jobs:
         run: |
           python -c "import os; open('cookies.txt', 'w', encoding='utf-8').write(os.environ.get('YT_COOKIES', ''))"
 
-      # ─── گام اول: کلاینت اندروید (بدون کوکی - پرسرعت و مخفیانه) ───
-      - name: Download Video (Ninja Mode - Android)
+      # ─── دانلود مستقیم بدون کوکی ───
+      - name: Download Video (Ninja Mode)
         id: download_direct
         run: |
-          title=$(yt-dlp --get-title --impersonate chrome --extractor-args "youtube:player_client=android" --remote-components "ejs:github" --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
+          title=$(yt-dlp --get-title --impersonate chrome --extractor-args "youtube:player_client=android,web" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 5 "${{ github.event.client_payload.url }}")
           echo "title=$title" >> $GITHUB_OUTPUT
           
-          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --impersonate chrome --extractor-args "youtube:player_client=android" --remote-components "ejs:github" --no-check-certificate --retries 5 --fragment-retries infinite --concurrent-fragments 3 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --impersonate chrome --extractor-args "youtube:player_client=android,web" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 5 --fragment-retries infinite --concurrent-fragments 3 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
         continue-on-error: true
 
-      # ─── گام دوم: روشن کردن تونل WARP ───
+      # ─── کلودفلر WARP در صورت شلوغی ───
       - name: Install & Run Cloudflare WARP (Fallback Mode)
         if: steps.download_direct.outcome == 'failure'
         uses: fscarmen/warp-on-actions@v1.1
         with:
           stack: dual
 
-      # ─── گام سوم: دانلود با WARP + کوکی (بدون کانکشن‌های همزمان برای جلوگیری از 403) ───
+      # ─── دانلود سنگین با WARP + تلویزیون ───
       - name: Download Video (via WARP Fallback)
         id: download_warp
         if: steps.download_direct.outcome == 'failure'
         run: |
-          title=$(yt-dlp --get-title --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=default" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 5 "${{ github.event.client_payload.url }}")
+          title=$(yt-dlp --get-title --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=tv" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 5 "${{ github.event.client_payload.url }}")
           echo "title=$title" >> $GITHUB_OUTPUT
           
-          # 🚨 حذف --concurrent-fragments برای جلوگیری از حساس شدن CDN یوتیوب روی کلودفلر 🚨
-          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=default" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 10 --fragment-retries infinite -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=tv" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 10 --fragment-retries infinite --concurrent-fragments 3 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
 
-      # ─── گام چهارم: دریافت تایتل ───
+      # ─── دریافت تایتل نهایی ───
       - name: Get Final Title
         id: final_title
         run: |
@@ -72,14 +95,14 @@ jobs:
             echo "val=${{ steps.download_warp.outputs.title }}" >> $GITHUB_OUTPUT
           fi
 
-      # ─── خاموش کردن پروکسی قبل از ارتباط با تلگرام ───
+      # ─── خاموش کردن پروکسی قبل از تلگرام ───
       - name: Restore Network (Disable WARP)
         if: always()
         run: |
           sudo warp-cli disconnect || true
           sudo systemctl stop warp-svc || true
 
-      # ─── گام پنجم: آپلود به تلگرام ───
+      # ─── آپلود سریع با سشن‌های ۵ گانه ───
       - name: Upload Video to Telegram
         env:
           API_ID: ${{ secrets.API_ID }}
