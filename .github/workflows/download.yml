@@ -5,7 +5,7 @@ on:
     types: [download_video]
 
 concurrency:
-  group: download-video-${{ github.event.client_payload.url }}
+  group: download-video-${{ github.event.client_payload.message_id }}
   cancel-in-progress: false
 
 jobs:
@@ -22,22 +22,23 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
+          cache-dependency-path: .github/workflows/requirements.txt
 
       - name: Install system dependencies
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
+          sudo apt-get update -qq
           if ! command -v ffmpeg >/dev/null 2>&1; then
-            sudo apt-get install -y ffmpeg
+            sudo apt-get install -y --no-install-recommends ffmpeg
           fi
 
       - name: Install Python Dependencies
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install --upgrade pip
-          pip install -U "yt-dlp[default,curl-cffi]" pyrogram tgcrypto redis
+          python -m pip install -U pip
+          pip install -r .github/workflows/requirements.txt
 
       - name: Setup YouTube Cookies
         env:
@@ -54,21 +55,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           url="${{ github.event.client_payload.url }}"
 
-          title="$(yt-dlp --print title --skip-download "$url" | tail -n 1)"
+          if [ -s cookies.txt ]; then
+            title="$(yt-dlp --cookies cookies.txt --print title --skip-download "$url" | tail -n 1)"
+            yt-dlp \
+              --cookies cookies.txt \
+              -f "bv*+ba/b" \
+              --merge-output-format mp4 \
+              --retries 5 \
+              --fragment-retries 5 \
+              -o "video.%(ext)s" \
+              "$url"
+          else
+            title="$(yt-dlp --print title --skip-download "$url" | tail -n 1)"
+            yt-dlp \
+              -f "bv*+ba/b" \
+              --merge-output-format mp4 \
+              --retries 5 \
+              --fragment-retries 5 \
+              -o "video.%(ext)s" \
+              "$url"
+          fi
+
           echo "title=$title" >> "$GITHUB_OUTPUT"
-
-          yt-dlp \
-            -f "bv*+ba/b" \
-            --merge-output-format mp4 \
-            --retries 5 \
-            --fragment-retries 5 \
-            -o "video.%(ext)s" \
-            "$url"
-
-          file="$(ls -1 video.* | head -n 1)"
-          echo "file=$file" >> "$GITHUB_OUTPUT"
 
       - name: Upload Video to Telegram
         env:
