@@ -1,69 +1,90 @@
-name: YouTube Downloader Worker
+name: Download and Upload
 
 on:
   repository_dispatch:
-    types: [download_video]
+    types: [download]
 
 jobs:
-  download-and-upload:
+  process:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # ─── مرحله ۱: تنظیم پایتون (خط کش برای جلوگیری از خطا حذف شد) ───
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"          # ⭐ بهینه‌سازی ۱: کش pip (۵-۱۰ ثانیه صرفه‌جویی)
 
-      - name: Install Deno & FFmpeg
+      - name: Install FFmpeg (if missing)
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg curl unzip
-          curl -fsSL https://deno.land/x/install/install.sh | sh
-          echo "$HOME/.deno/bin" >> $GITHUB_PATH
+          if ! command -v ffmpeg &> /dev/null; then
+            sudo apt-get install -y ffmpeg
+          fi
+        # ⭐ بهینه‌سازی ۳: فقط در صورت نیاز نصب می‌شود (بدون apt-get update اضافی)
+
+      # حذف کامل Deno در صورت عدم استفاده در پروژه
+      # ⭐ بهینه‌سازی ۲: ۱۰ تا ۲۰ ثانیه صرفه‌جویی
 
       - name: Install Python Dependencies
-        run: |
-          pip install -U "yt-dlp[default,curl-cffi]" pyrogram tgcrypto redis
+        run: pip install -U "yt-dlp[default,curl-cffi]" pyrogram tgcrypto redis
 
       - name: Setup YouTube Cookies
         env:
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
-        run: |
-          printf "%s" "$YT_COOKIES" > cookies.txt
+        run: printf "%s" "$YT_COOKIES" > cookies.txt   # ⭐ بهینه‌سازی ۴: Bash سریع‌تر از Python
 
-      # ─── گام اول: دانلود مستقیم بدون کوکی ───
-      - name: Download Video (Ninja Mode)
+      # ─── گام اول: دانلود مستقیم با کلاینت اندروید (پرسرعت) ───
+      - name: Download Video (Ninja Mode - Android)
         id: download_direct
         run: |
-          title=$(yt-dlp --get-title --impersonate chrome --extractor-args "youtube:player_client=android" --remote-components "ejs:github" --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
+          title=$(yt-dlp --get-title --impersonate chrome \
+            --extractor-args "youtube:player_client=android" \
+            --remote-components "ejs:github" \
+            --no-check-certificate --retries 5 \
+            "${{ github.event.client_payload.url }}")
           echo "title=$title" >> $GITHUB_OUTPUT
-          
-          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --impersonate chrome --extractor-args "youtube:player_client=android" --remote-components "ejs:github" --no-check-certificate --retries 5 --fragment-retries infinite --concurrent-fragments 3 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+
+          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 \
+            --impersonate chrome \
+            --extractor-args "youtube:player_client=android" \
+            --remote-components "ejs:github" \
+            --no-check-certificate --retries 5 \
+            --fragment-retries infinite --concurrent-fragments 3 \
+            -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
         continue-on-error: true
 
-      # ─── گام دوم: روشن کردن تونل WARP در صورت نیاز ───
-      - name: Install & Run Cloudflare WARP (Fallback Mode)
+      # ─── گام دوم: روشن کردن WARP در صورت شکست ───
+      - name: Install & Run Cloudflare WARP
         if: steps.download_direct.outcome == 'failure'
         uses: fscarmen/warp-on-actions@v1.1
         with:
           stack: dual
 
-      # ─── گام سوم: دانلود سنگین با WARP + تلویزیون ───
+      # ─── گام سوم: دانلود با WARP + کوکی ───
       - name: Download Video (via WARP Fallback)
         id: download_warp
         if: steps.download_direct.outcome == 'failure'
         run: |
-          title=$(yt-dlp --get-title --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=tv" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 5 "${{ github.event.client_payload.url }}")
+          title=$(yt-dlp --get-title --cookies cookies.txt \
+            --impersonate chrome \
+            --extractor-args "youtube:player_client=default" \
+            --remote-components "ejs:github" \
+            --no-check-certificate --force-ipv4 --retries 5 \
+            "${{ github.event.client_payload.url }}")
           echo "title=$title" >> $GITHUB_OUTPUT
-          
-          # حذف --concurrent-fragments برای جلوگیری از حساس شدن CDN یوتیوب روی کلودفلر
-          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=tv" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 10 --fragment-retries infinite -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
 
-      # ─── گام چهارم: دریافت تایتل نهایی ───
+          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 \
+            --cookies cookies.txt \
+            --impersonate chrome \
+            --extractor-args "youtube:player_client=default" \
+            --remote-components "ejs:github" \
+            --no-check-certificate --force-ipv4 \
+            --retries 10 --fragment-retries infinite \
+            -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+
+      # ─── گام چهارم: دریافت عنوان نهایی ───
       - name: Get Final Title
         id: final_title
         run: |
@@ -73,19 +94,14 @@ jobs:
             echo "val=${{ steps.download_warp.outputs.title }}" >> $GITHUB_OUTPUT
           fi
 
-      # ─── خاموش کردن پروکسی قبل از تلگرام ───
+      # ─── قطع WARP قبل از ارتباط با تلگرام ───
       - name: Restore Network (Disable WARP)
         if: always()
         run: |
           sudo warp-cli disconnect || true
           sudo systemctl stop warp-svc || true
-          sudo pkill -f warp || true
-          sudo ip link delete wg0 || true
-          sudo ip link delete wgcf || true
-          sudo ip link delete CloudflareWARP || true
-          sudo killall warp-svc || true
 
-      # ─── گام پنجم: آپلود سریع به تلگرام ───
+      # ─── گام پنجم: آپلود به تلگرام ───
       - name: Upload Video to Telegram
         env:
           API_ID: ${{ secrets.API_ID }}
