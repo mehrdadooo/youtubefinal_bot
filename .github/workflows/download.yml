@@ -17,32 +17,47 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
 
       - name: Install Deno & FFmpeg
+        shell: bash
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg curl unzip
+          set -euo pipefail
+          sudo apt-get update -qq
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
           curl -fsSL https://deno.land/x/install/install.sh | sh
-          echo "$HOME/.deno/bin" >> $GITHUB_PATH
+          echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
 
       - name: Install Python Dependencies
+        shell: bash
         run: |
-          pip install -U "yt-dlp[default,curl-cffi]" pyrogram tgcrypto redis
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Setup YouTube Cookies
         env:
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
+        shell: bash
         run: |
-          python -c "import os; open('cookies.txt', 'w', encoding='utf-8').write(os.environ.get('YT_COOKIES', ''))"
+          set -euo pipefail
+          printf "%s" "$YT_COOKIES" > cookies.txt
 
       # ─── گام اول: کلاینت اندروید (بدون کوکی - پرسرعت و مخفیانه) ───
       - name: Download Video (Ninja Mode - Android)
         id: download_direct
-        run: |
-          title=$(yt-dlp --get-title --impersonate chrome --extractor-args "youtube:player_client=android" --remote-components "ejs:github" --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
-          echo "title=$title" >> $GITHUB_OUTPUT
-          
-          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --impersonate chrome --extractor-args "youtube:player_client=android" --remote-components "ejs:github" --no-check-certificate --retries 5 --fragment-retries infinite --concurrent-fragments 3 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
         continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          title=$(yt-dlp --get-title --impersonate chrome --extractor-args "youtube:player_client=android" --remote-components "ejs:github" --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+
+          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --impersonate chrome --extractor-args "youtube:player_client=android" --remote-components "ejs:github" --no-check-certificate --retries 5 --fragment-retries infinite --concurrent-fragments 3 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
 
       # ─── گام دوم: روشن کردن تونل WARP ───
       - name: Install & Run Cloudflare WARP (Fallback Mode)
@@ -55,26 +70,31 @@ jobs:
       - name: Download Video (via WARP Fallback)
         id: download_warp
         if: steps.download_direct.outcome == 'failure'
+        shell: bash
         run: |
+          set -euo pipefail
+
           title=$(yt-dlp --get-title --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=default" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 5 "${{ github.event.client_payload.url }}")
-          echo "title=$title" >> $GITHUB_OUTPUT
-          
-          # 🚨 حذف --concurrent-fragments برای جلوگیری از حساس شدن CDN یوتیوب روی کلودفلر 🚨
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+
           yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=default" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 10 --fragment-retries infinite -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
 
       # ─── گام چهارم: دریافت تایتل ───
       - name: Get Final Title
         id: final_title
+        shell: bash
         run: |
+          set -euo pipefail
           if [ "${{ steps.download_direct.outcome }}" = "success" ]; then
-            echo "val=${{ steps.download_direct.outputs.title }}" >> $GITHUB_OUTPUT
+            echo "val=${{ steps.download_direct.outputs.title }}" >> "$GITHUB_OUTPUT"
           else
-            echo "val=${{ steps.download_warp.outputs.title }}" >> $GITHUB_OUTPUT
+            echo "val=${{ steps.download_warp.outputs.title }}" >> "$GITHUB_OUTPUT"
           fi
 
       # ─── خاموش کردن پروکسی قبل از ارتباط با تلگرام ───
       - name: Restore Network (Disable WARP)
         if: always()
+        shell: bash
         run: |
           sudo warp-cli disconnect || true
           sudo systemctl stop warp-svc || true
@@ -87,7 +107,9 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           BOT_SESSIONS: ${{ secrets.BOT_SESSIONS }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
+        shell: bash
         run: |
+          set -euo pipefail
           python upload.py \
             "${{ github.event.client_payload.chat_id }}" \
             "${{ github.event.client_payload.message_id }}" \
