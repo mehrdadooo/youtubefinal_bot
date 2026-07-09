@@ -5,7 +5,7 @@ on:
     types: [download_video]
 
 concurrency:
-  group: download-video-${{ github.event.client_payload.message_id }}
+  group: download-video-${{ github.event.client_payload.message_id || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -22,23 +22,21 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
-          cache-dependency-path: .github/workflows/requirements.txt
+          cache-dependency-path: requirements.txt
 
       - name: Install system dependencies
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          if ! command -v ffmpeg >/dev/null 2>&1; then
-            sudo apt-get install -y --no-install-recommends ffmpeg
-          fi
+          sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: Install Python Dependencies
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install -U pip
-          pip install -r .github/workflows/requirements.txt
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Setup YouTube Cookies
         env:
@@ -55,7 +53,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           url="${{ github.event.client_payload.url }}"
 
           if [ -s cookies.txt ]; then
