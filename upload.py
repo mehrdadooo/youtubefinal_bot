@@ -61,7 +61,7 @@ async def main():
                         app.send_video(
                             chat_id=chat_id,
                             video=file_path,
-                            caption=f"🎬 **{title}**\n\n⚡ دانلود شده توسط **ارتش گیت‌هاب**",
+                            caption=f"🎬 **{title}**\n\n⚡ دانلود شده توسط ****",
                             reply_to_message_id=message_id,
                             supports_streaming=True
                         ),
