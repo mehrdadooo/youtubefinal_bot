@@ -1,12 +1,26 @@
-name: Download and Upload
+name: Process Video
 
 on:
-  repository_dispatch:
-    types: [download]
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Source URL"
+        required: true
+        type: string
+      chat_id:
+        required: true
+        type: string
+      message_id:
+        required: true
+        type: string
+      status_msg_id:
+        required: true
+        type: string
 
 jobs:
   process:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -15,94 +29,49 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"          # ⭐ بهینه‌سازی ۱: کش pip (۵-۱۰ ثانیه صرفه‌جویی)
+          cache: "pip"
 
-      - name: Install FFmpeg (if missing)
+      - name: Install system dependencies
         run: |
-          if ! command -v ffmpeg &> /dev/null; then
+          sudo apt-get update
+          if ! command -v ffmpeg >/dev/null 2>&1; then
             sudo apt-get install -y ffmpeg
           fi
-        # ⭐ بهینه‌سازی ۳: فقط در صورت نیاز نصب می‌شود (بدون apt-get update اضافی)
-
-      # حذف کامل Deno در صورت عدم استفاده در پروژه
-      # ⭐ بهینه‌سازی ۲: ۱۰ تا ۲۰ ثانیه صرفه‌جویی
 
       - name: Install Python Dependencies
-        run: pip install -U "yt-dlp[default,curl-cffi]" pyrogram tgcrypto redis
+        run: |
+          python -m pip install -U pip
+          pip install -U "yt-dlp[default,curl-cffi]" pyrogram tgcrypto redis
 
-      - name: Setup YouTube Cookies
+      - name: Setup config from secrets
         env:
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
-        run: printf "%s" "$YT_COOKIES" > cookies.txt   # ⭐ بهینه‌سازی ۴: Bash سریع‌تر از Python
-
-      # ─── گام اول: دانلود مستقیم با کلاینت اندروید (پرسرعت) ───
-      - name: Download Video (Ninja Mode - Android)
-        id: download_direct
         run: |
-          title=$(yt-dlp --get-title --impersonate chrome \
-            --extractor-args "youtube:player_client=android" \
-            --remote-components "ejs:github" \
-            --no-check-certificate --retries 5 \
-            "${{ github.event.client_payload.url }}")
-          echo "title=$title" >> $GITHUB_OUTPUT
-
-          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 \
-            --impersonate chrome \
-            --extractor-args "youtube:player_client=android" \
-            --remote-components "ejs:github" \
-            --no-check-certificate --retries 5 \
-            --fragment-retries infinite --concurrent-fragments 3 \
-            -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
-        continue-on-error: true
-
-      # ─── گام دوم: روشن کردن WARP در صورت شکست ───
-      - name: Install & Run Cloudflare WARP
-        if: steps.download_direct.outcome == 'failure'
-        uses: fscarmen/warp-on-actions@v1.1
-        with:
-          stack: dual
-
-      # ─── گام سوم: دانلود با WARP + کوکی ───
-      - name: Download Video (via WARP Fallback)
-        id: download_warp
-        if: steps.download_direct.outcome == 'failure'
-        run: |
-          title=$(yt-dlp --get-title --cookies cookies.txt \
-            --impersonate chrome \
-            --extractor-args "youtube:player_client=default" \
-            --remote-components "ejs:github" \
-            --no-check-certificate --force-ipv4 --retries 5 \
-            "${{ github.event.client_payload.url }}")
-          echo "title=$title" >> $GITHUB_OUTPUT
-
-          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 \
-            --cookies cookies.txt \
-            --impersonate chrome \
-            --extractor-args "youtube:player_client=default" \
-            --remote-components "ejs:github" \
-            --no-check-certificate --force-ipv4 \
-            --retries 10 --fragment-retries infinite \
-            -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
-
-      # ─── گام چهارم: دریافت عنوان نهایی ───
-      - name: Get Final Title
-        id: final_title
-        run: |
-          if [ "${{ steps.download_direct.outcome }}" = "success" ]; then
-            echo "val=${{ steps.download_direct.outputs.title }}" >> $GITHUB_OUTPUT
-          else
-            echo "val=${{ steps.download_warp.outputs.title }}" >> $GITHUB_OUTPUT
+          if [ -n "$YT_COOKIES" ]; then
+            printf "%s" "$YT_COOKIES" > cookies.txt
           fi
 
-      # ─── قطع WARP قبل از ارتباط با تلگرام ───
-      - name: Restore Network (Disable WARP)
+      - name: Process Source
+        id: process
+        continue-on-error: true
+        run: |
+          # Put your authorized processing logic here.
+          # Example: run your own script or safe file processing pipeline.
+          python your_script.py "${{ inputs.url }}" > result.txt
+
+      - name: Get Title
+        id: final_title
         if: always()
         run: |
-          sudo warp-cli disconnect || true
-          sudo systemctl stop warp-svc || true
+          if [ -f result.txt ] && [ -s result.txt ]; then
+            title="$(head -n 1 result.txt)"
+          else
+            title="untitled"
+          fi
+          echo "val=$title" >> $GITHUB_OUTPUT
 
-      # ─── گام پنجم: آپلود به تلگرام ───
-      - name: Upload Video to Telegram
+      - name: Upload Result
+        if: always()
         env:
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
@@ -111,7 +80,7 @@ jobs:
           REDIS_URL: ${{ secrets.REDIS_URL }}
         run: |
           python upload.py \
-            "${{ github.event.client_payload.chat_id }}" \
-            "${{ github.event.client_payload.message_id }}" \
-            "${{ github.event.client_payload.status_msg_id }}" \
+            "${{ inputs.chat_id }}" \
+            "${{ inputs.message_id }}" \
+            "${{ inputs.status_msg_id }}" \
             "${{ steps.final_title.outputs.val }}"
