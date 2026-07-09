@@ -1,4 +1,0 @@
-yt-dlp[default,curl-cffi]
-pyrogram
-tgcrypto
-redis
