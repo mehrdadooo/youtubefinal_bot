@@ -46,18 +46,32 @@ jobs:
           set -euo pipefail
           printf "%s" "$YT_COOKIES" > cookies.txt
 
-      # ─── گام اول: کلاینت اندروید (بدون کوکی - پرسرعت و مخفیانه) ───
+      # ─── گام اول: کلاینت اندروید (بدون کوکی - پرسرعت و اعمال کیفیت) ───
       - name: Download Video (Ninja Mode - Android)
         id: download_direct
         continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
-
+          
+          # 🚨 دریافت کیفیت ارسالی از سمت هرمس
+          QUALITY="${{ github.event.client_payload.quality }}"
+          
+          # استخراج تایتل
           title=$(yt-dlp --get-title --impersonate chrome --extractor-args "youtube:player_client=android" --remote-components "ejs:github" --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
           echo "title=$title" >> "$GITHUB_OUTPUT"
 
-          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --impersonate chrome --extractor-args "youtube:player_client=android" --remote-components "ejs:github" --no-check-certificate --retries 5 --fragment-retries infinite --concurrent-fragments 3 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+          # 🚨 منطق هوشمند اعمال کیفیت و کاور 🚨
+          if [ "$QUALITY" = "audio" ]; then
+            yt-dlp -f "bestaudio/b" --extract-audio --audio-format mp3 --impersonate chrome --extractor-args "youtube:player_client=android" --remote-components "ejs:github" --no-check-certificate --retries 5 --fragment-retries infinite --concurrent-fragments 3 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+          else
+            SORT_ARGS=""
+            if [ "$QUALITY" = "1080" ]; then SORT_ARGS="-S height:1080"; fi
+            if [ "$QUALITY" = "720" ]; then SORT_ARGS="-S height:720"; fi
+            if [ "$QUALITY" = "480" ]; then SORT_ARGS="-S height:480"; fi
+
+            yt-dlp -f "bv*+ba/b" $SORT_ARGS --merge-output-format mp4 --write-info-json --write-thumbnail --convert-thumbnails jpg --postprocessor-args "ffmpeg:-movflags +faststart" --impersonate chrome --extractor-args "youtube:player_client=android" --remote-components "ejs:github" --no-check-certificate --retries 5 --fragment-retries infinite --concurrent-fragments 3 -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+          fi
 
       # ─── گام دوم: روشن کردن تونل WARP ───
       - name: Install & Run Cloudflare WARP (Fallback Mode)
@@ -66,18 +80,29 @@ jobs:
         with:
           stack: dual
 
-      # ─── گام سوم: دانلود با WARP + کوکی (بدون کانکشن‌های همزمان برای جلوگیری از 403) ───
+      # ─── گام سوم: دانلود با WARP + کوکی (تانک سنگین با اعمال کیفیت) ───
       - name: Download Video (via WARP Fallback)
         id: download_warp
         if: steps.download_direct.outcome == 'failure'
         shell: bash
         run: |
           set -euo pipefail
+          
+          QUALITY="${{ github.event.client_payload.quality }}"
 
-          title=$(yt-dlp --get-title --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=default" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 5 "${{ github.event.client_payload.url }}")
+          title=$(yt-dlp --get-title --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=tv" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 5 "${{ github.event.client_payload.url }}")
           echo "title=$title" >> "$GITHUB_OUTPUT"
 
-          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=default" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 10 --fragment-retries infinite -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+          if [ "$QUALITY" = "audio" ]; then
+            yt-dlp -f "bestaudio/b" --extract-audio --audio-format mp3 --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=tv" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 10 --fragment-retries infinite -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+          else
+            SORT_ARGS=""
+            if [ "$QUALITY" = "1080" ]; then SORT_ARGS="-S height:1080"; fi
+            if [ "$QUALITY" = "720" ]; then SORT_ARGS="-S height:720"; fi
+            if [ "$QUALITY" = "480" ]; then SORT_ARGS="-S height:480"; fi
+
+            yt-dlp -f "bv*+ba/b" $SORT_ARGS --merge-output-format mp4 --write-info-json --write-thumbnail --convert-thumbnails jpg --postprocessor-args "ffmpeg:-movflags +faststart" --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=tv" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 10 --fragment-retries infinite -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+          fi
 
       # ─── گام چهارم: دریافت تایتل ───
       - name: Get Final Title
