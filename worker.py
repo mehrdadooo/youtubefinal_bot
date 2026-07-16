@@ -41,6 +41,10 @@ def _setup_cookies():
         with open(COOKIE_FILE_PATH, "w", encoding="utf-8") as f:
             f.write(cookie_data)
         print_log("🍪 YT_COOKIES detected! cookies.txt written successfully.")
+        # نمایش ۵۰ کاراکتر اول برای بررسی خالی نبودن
+        with open(COOKIE_FILE_PATH, "r") as f:
+            content = f.read(50)
+        print_log(f"🍪 First 50 chars of cookies: {content}")
         return True
     return False
 
@@ -154,7 +158,7 @@ async def download_video_via_ytdlp(url, job_dir, quality="max"):
     else:
         base_cmd.extend(["--merge-output-format", "mp4", "--postprocessor-args", "ffmpeg:-movflags +faststart"])
 
-    # تنظیمات مشترک
+    # تنظیمات مشترک: پروکسی و کوکی‌ها
     use_proxy = os.getenv("VLESS_LINK") is not None
     _setup_cookies()
     has_cookies = COOKIE_FILE_PATH.exists()
@@ -163,14 +167,15 @@ async def download_video_via_ytdlp(url, job_dir, quality="max"):
     if use_proxy:
         common_args.extend(["--proxy", "socks5h://127.0.0.1:10808"])
     if has_cookies:
-        common_args.extend(["--cookies", str(COOKIE_FILE_PATH.resolve())])   # ✅ اصلاح کلیدی
+        common_args.extend(["--cookies", str(COOKIE_FILE_PATH.resolve())])   # اصلاح کلیدی
 
-    # ==================== فاز اول: نینجا ====================
-    print_log("🥷 Trying Ninja Mode (Direct + Android client + Cookies)...")
+    # ==================== فاز اول: نینجا (بدون پروکسی، کلاینت web/ios) ====================
+    print_log("🥷 Trying Ninja Mode (Cookies + Web/iOS Client)...")
     ninja_cmd = list(base_cmd)
     ninja_cmd.extend(common_args)
     if is_youtube:
-        ninja_cmd.extend(["--extractor-args", "youtube:player_client=android"])
+        # کلاینت‌هایی که کوکی را پشتیبانی می‌کنند: web, ios
+        ninja_cmd.extend(["--extractor-args", "youtube:player_client=web,ios;formats=missing_pot"])
         ninja_cmd.extend(["--impersonate", "chrome"])
     ninja_cmd.append(url)
 
@@ -195,12 +200,12 @@ async def download_video_via_ytdlp(url, job_dir, quality="max"):
 
     print_log(f"⚠️ Ninja Mode failed. Initiating Tank Mode fallback...")
 
-    # ==================== فاز دوم: تانک ====================
-    print_log("🛡️ Trying Tank Mode (VLESS Proxy + Cookies + TV client)...")
+    # ==================== فاز دوم: تانک (پروکسی + کلاینت tv/web) ====================
+    print_log("🛡️ Trying Tank Mode (Proxy + TV/Web Client + Cookies)...")
     tank_cmd = list(base_cmd)
     tank_cmd.extend(common_args)
     if is_youtube:
-        tank_cmd.extend(["--extractor-args", "youtube:player_client=tv"])
+        tank_cmd.extend(["--extractor-args", "youtube:player_client=tv,web;formats=missing_pot"])
         tank_cmd.extend(["--impersonate", "chrome"])
         tank_cmd.extend(["--force-ipv4"])
     tank_cmd.append(url)
