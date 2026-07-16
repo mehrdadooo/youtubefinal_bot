@@ -118,7 +118,7 @@ async def download_video_via_ytdlp(url, job_dir, quality="max"):
     is_youtube = "youtube.com" in url.lower() or "youtu.be" in url.lower()
     absolute_job_dir = str(job_dir.resolve())
 
-    # انتخاب فرمت (همان منطق قبلی، فقط با پشتیبانی از رشته‌های مختلف)
+    # انتخاب فرمت
     format_str = "bv*+ba/b" if is_youtube else "b"
     if quality == "1080": format_str = "bv*[height<=1080]+ba/b"
     elif quality == "720": format_str = "bv*[height<=720]+ba/b"
@@ -142,10 +142,9 @@ async def download_video_via_ytdlp(url, job_dir, quality="max"):
     else:
         base_cmd.extend(["--merge-output-format", "mp4", "--postprocessor-args", "ffmpeg:-movflags +faststart"])
 
-    # تنظیمات مشترک: پروکسی و کوکی‌ها
+    # تنظیمات مشترک: پروکسی و کوکی (همیشه فعال)
     use_proxy = os.getenv("VLESS_LINK") is not None
-    _setup_cookies()
-    has_cookies = COOKIE_FILE_PATH.exists()
+    has_cookies = _setup_cookies()
 
     common_args = []
     if use_proxy:
@@ -153,8 +152,8 @@ async def download_video_via_ytdlp(url, job_dir, quality="max"):
     if has_cookies:
         common_args.extend(["--cookies", str(COOKIE_FILE_PATH.resolve())])
 
-    # ==================== فاز اول: نینجا (همیشه با کوکی و پروکسی) ====================
-    print_log("🥷 Trying Ninja Mode (Cookies + Web/iOS Client + Proxy)...")
+    # ==================== فاز اول: نینجا (وب + iOS، با کوکی و پروکسی) ====================
+    print_log("🥷 Trying Ninja Mode (Web/iOS Client + Cookies + Proxy)...")
     ninja_cmd = list(base_cmd)
     ninja_cmd.extend(common_args)
     if is_youtube:
@@ -171,8 +170,8 @@ async def download_video_via_ytdlp(url, job_dir, quality="max"):
 
     print_log(f"⚠️ Ninja Mode failed (Exit code {process.returncode}). Initiating Tank Mode fallback...")
 
-    # ==================== فاز دوم: تانک (پروکسی + کوکی + TV/Web Client) ====================
-    print_log("🛡️ Trying Tank Mode (Proxy + TV/Web Client + Cookies)...")
+    # ==================== فاز دوم: تانک (TV + Web، با کوکی و پروکسی) ====================
+    print_log("🛡️ Trying Tank Mode (TV/Web Client + Proxy + Cookies)...")
     tank_cmd = list(base_cmd)
     tank_cmd.extend(common_args)
     if is_youtube:
@@ -328,12 +327,10 @@ async def main():
                                 try:
                                     async with upload_app:
                                         print_log(f"[{job_id}] 🚀 Attempt {attempt+1}: Uploading to Telegram...")
-
                                         if is_audio:
                                             await upload_app.send_audio(**upload_kwargs)
                                         else:
                                             await upload_app.send_video(**upload_kwargs)
-
                                         try: await upload_app.delete_messages(chat_id, status_msg_id)
                                         except: pass
                                     print_log(f"[{job_id}] 🎉 Job Completed!")
