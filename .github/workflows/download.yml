@@ -7,6 +7,7 @@ on:
 jobs:
   download-and-upload:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout Code
@@ -18,26 +19,39 @@ jobs:
           python-version: "3.11"
 
       - name: Install System Dependencies & Deno
+        shell: bash
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg curl unzip wget
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg unzip wget curl
           curl -fsSL https://deno.land/x/install/install.sh | sh
-          echo "$HOME/.deno/bin" >> $GITHUB_PATH
+          echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
 
       - name: Install Python Dependencies
+        shell: bash
         run: |
-          pip install pyrogram tgcrypto python-dotenv aiohttp curl_cffi
-          pip install https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.tar.gz
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -U yt-dlp curl_cffi pyrogram tgcrypto aiohttp
 
       - name: Setup YouTube Cookies
         env:
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
+        shell: bash
         run: |
-          python -c "import os; open('cookies.txt', 'w', encoding='utf-8').write(os.environ.get('YT_COOKIES', ''))"
+          set -euo pipefail
+          printf "%s" "$YT_COOKIES" > cookies.txt
 
       - name: Setup & Start Xray VLESS Proxy
         env:
           VLESS_LINK: ${{ secrets.VLESS_LINK }}
+        shell: bash
         run: |
+          set -euo pipefail
+          if [ -z "$VLESS_LINK" ]; then
+            echo "⚠️ VLESS_LINK not found. Skipping Xray."
+            exit 0
+          fi
           wget https://github.com/XTLS/Xray-core/releases/download/v1.8.9/Xray-linux-64.zip
           unzip Xray-linux-64.zip
           chmod +x xray
@@ -66,76 +80,20 @@ jobs:
           nohup ./xray run -c config.json > xray.log 2>&1 &
           sleep 3
 
-      - name: Download Video (Ninja & Tank Mode)
-        id: downloader
-        run: |
-          URL="${{ github.event.client_payload.url }}"
-          QUALITY="${{ github.event.client_payload.quality }}"
-          
-          IS_YOUTUBE=false
-          if [[ "$URL" == *"youtube.com"* ]] || [[ "$URL" == *"youtu.be"* ]]; then IS_YOUTUBE=true; fi
-          
-          # 🚨 منطق سخت‌گیرانه کیفیت دقیقاً مشابه worker.py
-          if [ "$IS_YOUTUBE" = true ]; then
-              if [ "$QUALITY" = "1080" ]; then FORMAT_STR="bv*[height>=1080]+ba"; 
-              elif [ "$QUALITY" = "720" ]; then FORMAT_STR="bv*[height>=720]+ba"; 
-              elif [ "$QUALITY" = "480" ]; then FORMAT_STR="bv*[height>=480]+ba"; 
-              elif [ "$QUALITY" = "audio" ]; then FORMAT_STR="ba/b"; 
-              else FORMAT_STR="bv*+ba/b"; fi
-          else
-              FORMAT_STR="b"
-              if [ "$QUALITY" = "1080" ]; then FORMAT_STR="best[height<=1080]/best"; 
-              elif [ "$QUALITY" = "720" ]; then FORMAT_STR="best[height<=720]/best"; 
-              elif [ "$QUALITY" = "480" ]; then FORMAT_STR="best[height<=480]/best"; 
-              elif [ "$QUALITY" = "audio" ]; then FORMAT_STR="ba/b"; fi
-          fi
-
-          BASE_CMD="yt-dlp --rm-cache-dir -f \"$FORMAT_STR\" --write-info-json --write-thumbnail --convert-thumbnails jpg --no-check-certificate --retries 5 --fragment-retries infinite -o video.%(ext)s"
-          
-          if [ "$QUALITY" = "audio" ]; then
-              BASE_CMD="$BASE_CMD --extract-audio --audio-format mp3"
-          else
-              BASE_CMD="$BASE_CMD --merge-output-format mp4 --postprocessor-args \"ffmpeg:-movflags +faststart\""
-          fi
-
-          echo "🥷 Trying Ninja Mode..."
-          NINJA_CMD="$BASE_CMD"
-          if [ "$IS_YOUTUBE" = true ]; then
-              NINJA_CMD="$NINJA_CMD --extractor-args youtube:player_client=android,ios --remote-components ejs:github --impersonate chrome"
-          fi
-          
-          if eval "$NINJA_CMD \"$URL\""; then
-              echo "✅ Ninja Mode Success!"
-              exit 0
-          fi
-
-          echo "⚠️ Ninja Mode failed. Initiating Tank Mode fallback..."
-          echo "🛡️ Trying Tank Mode (VLESS Proxy + Cookies + TV/VR Client)..."
-          
-          TANK_CMD="$BASE_CMD --proxy socks5h://127.0.0.1:10808 --cookies cookies.txt"
-          if [ "$IS_YOUTUBE" = true ]; then
-              TANK_CMD="$TANK_CMD --extractor-args youtube:player_client=tv,android_vr --remote-components ejs:github --impersonate chrome --force-ipv4"
-          fi
-          
-          if eval "$TANK_CMD \"$URL\""; then
-              echo "✅ Tank Mode Success!"
-              exit 0
-          fi
-          
-          echo "❌ Both Ninja and Tank modes failed."
-          exit 1
-
-      - name: Upload Video to Telegram
-        if: always()
+      # 🚨 اجرای اسکریپت پایتون (دقیقاً مشابه ران‌ریل) 🚨
+      - name: Run Python Worker
         env:
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           BOT_SESSIONS: ${{ secrets.BOT_SESSIONS }}
+          VLESS_LINK: ${{ secrets.VLESS_LINK }}
+        shell: bash
         run: |
-          python upload.py \
+          set -euo pipefail
+          python github_worker.py \
+            "${{ github.event.client_payload.url }}" \
             "${{ github.event.client_payload.chat_id }}" \
             "${{ github.event.client_payload.message_id }}" \
             "${{ github.event.client_payload.status_msg_id }}" \
-            "${{ github.event.client_payload.quality }}" \
-            "${{ steps.downloader.outcome }}"
+            "${{ github.event.client_payload.quality }}"
