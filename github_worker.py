@@ -51,7 +51,7 @@ async def download_video_via_ytdlp(url, job_dir, quality="max"):
     cmd = [
         "yt-dlp", "--rm-cache-dir", "-f", format_str, 
         "--write-info-json", "--write-thumbnail", "--convert-thumbnails", "jpg",
-        "--no-check-certificate", "--retries", "5", "--fragment-retries", "infinite",
+        "--no-check-certificate", "--retries", "10", "--fragment-retries", "infinite",
         "-o", f"{absolute_job_dir}/video.%(ext)s"
     ]
     
@@ -60,10 +60,10 @@ async def download_video_via_ytdlp(url, job_dir, quality="max"):
     else:
         cmd.extend(["--merge-output-format", "mp4", "--postprocessor-args", "ffmpeg:-movflags +faststart"])
 
-    print_log("🥷 Trying Ninja Mode (Direct Connection + Android Client)...")
+    print_log("🥷 Trying Ninja Mode (Direct Connection + iOS Client)...")
     ninja_cmd = list(cmd)
     if is_youtube:
-        ninja_cmd.extend(["--extractor-args", "youtube:player_client=android", "--remote-components", "ejs:github", "--impersonate", "chrome"])
+        ninja_cmd.extend(["--extractor-args", "youtube:player_client=ios,android", "--remote-components", "ejs:github", "--impersonate", "chrome"])
     ninja_cmd.append(url)
     
     process = await asyncio.create_subprocess_exec(*ninja_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
@@ -75,7 +75,7 @@ async def download_video_via_ytdlp(url, job_dir, quality="max"):
         
     print_log(f"⚠️ Ninja Mode failed. Initiating Tank Mode fallback...")
 
-    print_log("🛡️ Trying Tank Mode (VLESS Proxy + Cookies + TV/VR Client)...")
+    print_log("🛡️ Trying Tank Mode (VLESS Proxy + Cookies + WEB_CREATOR Client)...")
     
     tank_cmd = list(cmd)
     if os.getenv("VLESS_LINK"):
@@ -84,7 +84,13 @@ async def download_video_via_ytdlp(url, job_dir, quality="max"):
         tank_cmd.extend(["--cookies", str(COOKIE_FILE_PATH.resolve())])
         
     if is_youtube:
-        tank_cmd.extend(["--extractor-args", "youtube:player_client=tv,android_vr", "--remote-components", "ejs:github", "--impersonate", "chrome", "--force-ipv4"])
+        # 🚨 فیکس قطعی ارور 403: استفاده از کلاینت‌های web_creator و tv_downgraded
+        tank_cmd.extend([
+            "--extractor-args", "youtube:player_client=web_creator,tv_downgraded,android_vr;player_skip=webpage", 
+            "--remote-components", "ejs:github", 
+            "--impersonate", "chrome", 
+            "--force-ipv4"
+        ])
     tank_cmd.append(url)
     
     process = await asyncio.create_subprocess_exec(*tank_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
@@ -211,7 +217,7 @@ async def main():
                     else: await upload_app.send_video(**upload_kwargs)
                     try: await upload_app.delete_messages(chat_id, status_msg_id)
                     except: pass
-                print_log("🎉 Job Completed!")
+                print_log("🎉 Upload Completed!")
                 upload_success = True
                 break
             except (AuthKeyDuplicated, AuthKeyInvalid): continue
@@ -221,7 +227,6 @@ async def main():
 
     except Exception as e: 
         print_log(f"❌ Error during processing: {e}")
-        # ارسال پیام ارور به تلگرام کاربر در صورت شکست کامل
         try:
             err_app = Client("err_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
             async with err_app:
