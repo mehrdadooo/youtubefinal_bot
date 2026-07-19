@@ -4,6 +4,8 @@ import asyncio
 import aiohttp
 import random
 import json
+import uuid  # 👈 این کلمه فراموش شده بود!
+import urllib.parse
 from pathlib import Path
 from pyrogram import Client
 from pyrogram.errors import FloodWait, AuthKeyDuplicated, AuthKeyInvalid
@@ -84,7 +86,6 @@ async def download_video_via_ytdlp(url, job_dir, quality="max"):
         tank_cmd.extend(["--cookies", str(COOKIE_FILE_PATH.resolve())])
         
     if is_youtube:
-        # 🚨 فیکس قطعی ارور 403: استفاده از کلاینت‌های web_creator و tv_downgraded
         tank_cmd.extend([
             "--extractor-args", "youtube:player_client=web_creator,tv_downgraded,android_vr;player_skip=webpage", 
             "--remote-components", "ejs:github", 
@@ -217,7 +218,7 @@ async def main():
                     else: await upload_app.send_video(**upload_kwargs)
                     try: await upload_app.delete_messages(chat_id, status_msg_id)
                     except: pass
-                print_log("🎉 Upload Completed!")
+                print_log("🎉 Job Completed!")
                 upload_success = True
                 break
             except (AuthKeyDuplicated, AuthKeyInvalid): continue
