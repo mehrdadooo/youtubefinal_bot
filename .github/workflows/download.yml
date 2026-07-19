@@ -7,7 +7,6 @@ on:
 jobs:
   download-and-upload:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
 
     steps:
       - name: Checkout Code
@@ -17,47 +16,32 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
-          cache-dependency-path: requirements.txt
 
-      - name: Install Deno & FFmpeg
-        shell: bash
+      - name: Install System Dependencies & Deno
         run: |
-          set -euo pipefail
-          sudo apt-get update -qq
-          if ! command -v ffmpeg >/dev/null 2>&1; then
-            sudo apt-get install -y --no-install-recommends ffmpeg
-          fi
+          sudo apt-get update && sudo apt-get install -y ffmpeg curl unzip wget
           curl -fsSL https://deno.land/x/install/install.sh | sh
-          echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.deno/bin" >> $GITHUB_PATH
 
       - name: Install Python Dependencies
-        shell: bash
         run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install pyrogram tgcrypto python-dotenv aiohttp curl_cffi
+          pip install https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.tar.gz
 
       - name: Setup YouTube Cookies
         env:
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
-        shell: bash
         run: |
-          set -euo pipefail
-          printf "%s" "$YT_COOKIES" > cookies.txt
+          python -c "import os; open('cookies.txt', 'w', encoding='utf-8').write(os.environ.get('YT_COOKIES', ''))"
 
-      # 🚨 گام جدید: نصب و راه‌اندازی موتور Xray VLESS 🚨
       - name: Setup & Start Xray VLESS Proxy
         env:
           VLESS_LINK: ${{ secrets.VLESS_LINK }}
-        shell: bash
         run: |
-          set -euo pipefail
           wget https://github.com/XTLS/Xray-core/releases/download/v1.8.9/Xray-linux-64.zip
           unzip Xray-linux-64.zip
           chmod +x xray
           
-          # اسکریپت پایتونِ درون‌خطی برای تبدیل VLESS به کانفیگ Xray
           python -c '
           import os, urllib.parse, json
           vless_url = os.environ.get("VLESS_LINK", "").split("#")[0]
@@ -79,84 +63,79 @@ jobs:
           }
           with open("config.json", "w") as f: json.dump(config, f)
           '
-          
           nohup ./xray run -c config.json > xray.log 2>&1 &
           sleep 3
-          curl -s -x socks5h://127.0.0.1:10808 https://icanhazip.com || echo "Xray failed to connect"
 
-      # ─── گام اول: کلاینت اندروید (بدون کوکی و بدون پروکسی - نینجا) ───
-      - name: Download Video (Ninja Mode - Android)
-        id: download_ninja
-        continue-on-error: true
-        shell: bash
+      - name: Download Video (Ninja & Tank Mode)
+        id: downloader
         run: |
-          set -euo pipefail
-          
+          URL="${{ github.event.client_payload.url }}"
           QUALITY="${{ github.event.client_payload.quality }}"
           
-          title=$(yt-dlp --get-title --impersonate chrome --extractor-args "youtube:player_client=android" --remote-components "ejs:github" --no-check-certificate --retries 5 "${{ github.event.client_payload.url }}")
-          echo "title=$title" >> "$GITHUB_OUTPUT"
-
-          if [ "$QUALITY" = "audio" ]; then
-            yt-dlp -f "bestaudio/b" --extract-audio --audio-format mp3 --impersonate chrome --extractor-args "youtube:player_client=android" --remote-components "ejs:github" --no-check-certificate --retries 5 --fragment-retries infinite -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
-          else
-            SORT_ARGS=""
-            if [ "$QUALITY" = "1080" ]; then SORT_ARGS="-S height:1080"; fi
-            if [ "$QUALITY" = "720" ]; then SORT_ARGS="-S height:720"; fi
-            if [ "$QUALITY" = "480" ]; then SORT_ARGS="-S height:480"; fi
-
-            yt-dlp -f "bv*+ba/b" $SORT_ARGS --merge-output-format mp4 --write-info-json --write-thumbnail --convert-thumbnails jpg --postprocessor-args "ffmpeg:-movflags +faststart" --impersonate chrome --extractor-args "youtube:player_client=android" --remote-components "ejs:github" --no-check-certificate --retries 5 --fragment-retries infinite -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
-          fi
-
-      # ─── گام دوم: دانلود با پروکسی VLESS + کوکی + کلاینت TV (تانک سنگین) ───
-      - name: Download Video (Tank Mode - VLESS + TV)
-        id: download_tank
-        if: steps.download_ninja.outcome == 'failure'
-        shell: bash
-        run: |
-          set -euo pipefail
+          IS_YOUTUBE=false
+          if [[ "$URL" == *"youtube.com"* ]] || [[ "$URL" == *"youtu.be"* ]]; then IS_YOUTUBE=true; fi
           
-          QUALITY="${{ github.event.client_payload.quality }}"
+          # 🚨 منطق سخت‌گیرانه کیفیت دقیقاً مشابه worker.py
+          if [ "$IS_YOUTUBE" = true ]; then
+              if [ "$QUALITY" = "1080" ]; then FORMAT_STR="bv*[height>=1080]+ba"; 
+              elif [ "$QUALITY" = "720" ]; then FORMAT_STR="bv*[height>=720]+ba"; 
+              elif [ "$QUALITY" = "480" ]; then FORMAT_STR="bv*[height>=480]+ba"; 
+              elif [ "$QUALITY" = "audio" ]; then FORMAT_STR="ba/b"; 
+              else FORMAT_STR="bv*+ba/b"; fi
+          else
+              FORMAT_STR="b"
+              if [ "$QUALITY" = "1080" ]; then FORMAT_STR="best[height<=1080]/best"; 
+              elif [ "$QUALITY" = "720" ]; then FORMAT_STR="best[height<=720]/best"; 
+              elif [ "$QUALITY" = "480" ]; then FORMAT_STR="best[height<=480]/best"; 
+              elif [ "$QUALITY" = "audio" ]; then FORMAT_STR="ba/b"; fi
+          fi
 
-          title=$(yt-dlp --get-title --proxy "socks5h://127.0.0.1:10808" --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=tv" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 5 "${{ github.event.client_payload.url }}")
-          echo "title=$title" >> "$GITHUB_OUTPUT"
-
+          BASE_CMD="yt-dlp --rm-cache-dir -f \"$FORMAT_STR\" --write-info-json --write-thumbnail --convert-thumbnails jpg --no-check-certificate --retries 5 --fragment-retries infinite -o video.%(ext)s"
+          
           if [ "$QUALITY" = "audio" ]; then
-            yt-dlp -f "bestaudio/b" --proxy "socks5h://127.0.0.1:10808" --extract-audio --audio-format mp3 --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=tv" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 10 --fragment-retries infinite -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+              BASE_CMD="$BASE_CMD --extract-audio --audio-format mp3"
           else
-            SORT_ARGS=""
-            if [ "$QUALITY" = "1080" ]; then SORT_ARGS="-S height:1080"; fi
-            if [ "$QUALITY" = "720" ]; then SORT_ARGS="-S height:720"; fi
-            if [ "$QUALITY" = "480" ]; then SORT_ARGS="-S height:480"; fi
-
-            yt-dlp -f "bv*+ba/b" $SORT_ARGS --proxy "socks5h://127.0.0.1:10808" --merge-output-format mp4 --write-info-json --write-thumbnail --convert-thumbnails jpg --postprocessor-args "ffmpeg:-movflags +faststart" --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=tv" --remote-components "ejs:github" --no-check-certificate --force-ipv4 --retries 10 --fragment-retries infinite -o "video.%(ext)s" "${{ github.event.client_payload.url }}"
+              BASE_CMD="$BASE_CMD --merge-output-format mp4 --postprocessor-args \"ffmpeg:-movflags +faststart\""
           fi
 
-      # ─── گام سوم: دریافت تایتل ───
-      - name: Get Final Title
-        id: final_title
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ "${{ steps.download_ninja.outcome }}" = "success" ]; then
-            echo "val=${{ steps.download_ninja.outputs.title }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "val=${{ steps.download_tank.outputs.title }}" >> "$GITHUB_OUTPUT"
+          echo "🥷 Trying Ninja Mode..."
+          NINJA_CMD="$BASE_CMD"
+          if [ "$IS_YOUTUBE" = true ]; then
+              NINJA_CMD="$NINJA_CMD --extractor-args youtube:player_client=android,ios --remote-components ejs:github --impersonate chrome"
+          fi
+          
+          if eval "$NINJA_CMD \"$URL\""; then
+              echo "✅ Ninja Mode Success!"
+              exit 0
           fi
 
-      # ─── گام چهارم: آپلود به تلگرام (حذف گام Restore Network به دلیل ایمن بودن VLESS) ───
+          echo "⚠️ Ninja Mode failed. Initiating Tank Mode fallback..."
+          echo "🛡️ Trying Tank Mode (VLESS Proxy + Cookies + TV/VR Client)..."
+          
+          TANK_CMD="$BASE_CMD --proxy socks5h://127.0.0.1:10808 --cookies cookies.txt"
+          if [ "$IS_YOUTUBE" = true ]; then
+              TANK_CMD="$TANK_CMD --extractor-args youtube:player_client=tv,android_vr --remote-components ejs:github --impersonate chrome --force-ipv4"
+          fi
+          
+          if eval "$TANK_CMD \"$URL\""; then
+              echo "✅ Tank Mode Success!"
+              exit 0
+          fi
+          
+          echo "❌ Both Ninja and Tank modes failed."
+          exit 1
+
       - name: Upload Video to Telegram
+        if: always()
         env:
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           BOT_SESSIONS: ${{ secrets.BOT_SESSIONS }}
-          REDIS_URL: ${{ secrets.REDIS_URL }}
-        shell: bash
         run: |
-          set -euo pipefail
           python upload.py \
             "${{ github.event.client_payload.chat_id }}" \
             "${{ github.event.client_payload.message_id }}" \
             "${{ github.event.client_payload.status_msg_id }}" \
-            "${{ steps.final_title.outputs.val }}"
+            "${{ github.event.client_payload.quality }}" \
+            "${{ steps.downloader.outcome }}"
